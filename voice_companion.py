@@ -68,7 +68,7 @@ async def startchat(ctx):
 
 async def continuous_listen(ctx):
     """Continuously listen and respond"""
-    global is_listening
+    global is_listening, conversation_history
 
     RATE = 16000
     CHUNK_DURATION = 1  # Record in 1-second chunks
