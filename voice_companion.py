@@ -70,22 +70,24 @@ async def continuous_listen(ctx):
 
     RATE = 16000
     CHUNK_DURATION = 1  # Record in 1-second chunks
-    SILENCE_THRESHOLD = config['silence_threshold']
-    SILENCE_DURATION = config['silence_duration']
-    MIC_DEVICE = config['mic_device']
-    
+
     recorded_audio = []
     silence_chunks = 0
-    
+
     await ctx.send("👂 Listening...")
-    
+
     # Use ThreadPoolExecutor to run blocking audio operations
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    
+
     while is_listening:
+        # Read config values on each iteration so changes take effect immediately
+        SILENCE_THRESHOLD = config['silence_threshold']
+        SILENCE_DURATION = config['silence_duration']
+        MIC_DEVICE = config['mic_device']
+
         # Run audio recording in a separate thread
         loop = asyncio.get_event_loop()
-        
+
         def record_chunk():
             chunk = sd.rec(
                 int(CHUNK_DURATION * RATE),
@@ -96,7 +98,7 @@ async def continuous_listen(ctx):
             )
             sd.wait()
             return chunk
-        
+
         # Record without blocking the event loop
         chunk = await loop.run_in_executor(executor, record_chunk)
 
@@ -127,25 +129,28 @@ async def continuous_listen(ctx):
                 
                 try:
                     # Transcribe
+                    print("🔄 Step 1: Transcribing audio...")
                     with open('temp_recording.wav', 'rb') as audio_file:
                         transcript = await client_oai.audio.transcriptions.create(
                             model="whisper-1",
                             file=audio_file
                         )
-                    
+
                     user_text = transcript.text
-                    
+                    print(f"✅ Transcription: {user_text}")
+
                     # Check if user said "stop chat"
                     if "stop chat" in user_text.lower():
                         is_listening = False
                         await ctx.send("✋ Stopping chat mode!")
                         break
-                    
+
                     await ctx.send(f"📝 You: {user_text}")
-                    
+
                     # Get Llama response
                     conversation_history.append({"role": "user", "content": user_text})
-                    
+
+                    print("🔄 Step 2: Getting Llama response...")
                     async with httpx.AsyncClient() as client:
                         response = await client.post(
                             "http://192.168.12.209:11434/api/chat",
@@ -156,36 +161,56 @@ async def continuous_listen(ctx):
                             },
                             timeout=30.0
                         )
-                        
+
+                        response.raise_for_status()  # Raise error for bad status codes
                         llama_response = response.json()["message"]["content"]
                         conversation_history.append({"role": "assistant", "content": llama_response})
-                        
+
+                        print(f"✅ Llama response: {llama_response[:100]}...")
                         await ctx.send(f"🤖 Bot: {llama_response}")
-                        
+
                         # Speak response
+                        print("🔄 Step 3: Generating TTS...")
                         tts_response = await client_oai.audio.speech.create(
                             model="tts-1",
                             voice="echo",
                             input=llama_response
                         )
-                        
+
                         with open("bot_response.mp3", "wb") as f:
                             f.write(tts_response.content)
-                        
+
+                        print("🔄 Step 4: Playing audio...")
                         audio_source = discord.FFmpegPCMAudio("bot_response.mp3")
                         ctx.voice_client.play(audio_source)
-                        
+
                         # Wait for audio to finish playing
                         while ctx.voice_client.is_playing():
                             await asyncio.sleep(0.1)
-                    
+
+                        print("✅ Audio playback complete")
+
                     # Reset for next input
                     recorded_audio = []
                     silence_chunks = 0
                     await ctx.send("👂 Listening...")
-                    
+
                 except Exception as e:
-                    await ctx.send(f"❌ Error: {str(e)}")
+                    import traceback
+                    error_msg = str(e)
+                    error_traceback = traceback.format_exc()
+
+                    # Log full error to console
+                    print(f"❌ ERROR OCCURRED:")
+                    print(error_traceback)
+
+                    # Send truncated error to Discord (max 2000 chars)
+                    if len(error_msg) > 1900:
+                        error_msg = error_msg[:1900] + "..."
+
+                    await ctx.send(f"❌ Error: {error_msg}")
+                    await ctx.send("👂 Listening... (continuing after error)")
+
                     recorded_audio = []
                     silence_chunks = 0
     
@@ -202,13 +227,19 @@ async def stopchat(ctx):
 async def setmic(ctx, device_id: int):
     """Set the microphone device. Usage: !setmic [device_id]"""
     config['mic_device'] = device_id
-    await ctx.send(f"✅ Microphone device set to: {device_id}")
+    if is_listening:
+        await ctx.send(f"✅ Microphone device set to: {device_id} (will take effect on next recording chunk)")
+    else:
+        await ctx.send(f"✅ Microphone device set to: {device_id}")
 
 @bot.command()
 async def setthreshold(ctx, threshold: int):
     """Set the silence threshold. Usage: !setthreshold [value]"""
     config['silence_threshold'] = threshold
-    await ctx.send(f"✅ Silence threshold set to: {threshold}")
+    if is_listening:
+        await ctx.send(f"✅ Silence threshold set to: {threshold} (active immediately)")
+    else:
+        await ctx.send(f"✅ Silence threshold set to: {threshold}")
 
 @bot.command()
 async def config_show(ctx):
@@ -279,7 +310,7 @@ async def testmic(ctx, device_id: int = 2, duration: int = 5):
         result += f"Max Chunk RMS: {max_chunk_rms:.2f}\n"
         result += f"Chunk RMS values: {[f'{v:.2f}' for v in chunk_rms_values]}\n\n"
         result += f"💡 **Recommended Threshold:** {avg_chunk_rms * 0.3:.2f} - {avg_chunk_rms * 0.7:.2f}\n"
-        result += f"Current threshold: 500"
+        result += f"Current threshold: {config['silence_threshold']}"
 
         await ctx.send(result)
 
