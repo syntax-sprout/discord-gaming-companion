@@ -38,6 +38,13 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 conversation_history = []
 is_listening = False
 
+# Configuration that can be changed at runtime
+config = {
+    'mic_device': 2,
+    'silence_threshold': 500,
+    'silence_duration': 2
+}
+
 @bot.command()
 async def startchat(ctx):
     """Start continuous conversation mode"""
@@ -60,12 +67,12 @@ async def startchat(ctx):
 async def continuous_listen(ctx):
     """Continuously listen and respond"""
     global is_listening
-    
+
     RATE = 16000
     CHUNK_DURATION = 1  # Record in 1-second chunks
-    SILENCE_THRESHOLD = 500  # Adjust based on your mic
-    SILENCE_DURATION = 2  # Seconds of silence before processing
-    MIC_DEVICE = 2  # Your Razer mic
+    SILENCE_THRESHOLD = config['silence_threshold']
+    SILENCE_DURATION = config['silence_duration']
+    MIC_DEVICE = config['mic_device']
     
     recorded_audio = []
     silence_chunks = 0
@@ -92,18 +99,24 @@ async def continuous_listen(ctx):
         
         # Record without blocking the event loop
         chunk = await loop.run_in_executor(executor, record_chunk)
-        
+
+        # Calculate and log RMS for debugging
+        chunk_rms = np.sqrt(np.mean(chunk**2))
+
         # Check if this chunk has speech
         if is_speech(chunk, SILENCE_THRESHOLD):
             # Speech detected!
+            print(f"🎤 Speech detected! RMS: {chunk_rms:.2f} (threshold: {SILENCE_THRESHOLD})")
             recorded_audio.append(chunk)
             silence_chunks = 0
         else:
             # Silence detected
             silence_chunks += 1
-            
+            print(f"🔇 Silence {silence_chunks}/{SILENCE_DURATION} - RMS: {chunk_rms:.2f} (threshold: {SILENCE_THRESHOLD})")
+
             # If we have recorded audio AND hit silence threshold, process it
             if len(recorded_audio) > 0 and silence_chunks >= SILENCE_DURATION:
+                print(f"✅ Processing {len(recorded_audio)} chunks of audio...")
                 await ctx.send("🔄 Processing...")
                 
                 # Combine all recorded chunks
@@ -185,10 +198,106 @@ async def stopchat(ctx):
     is_listening = False
     await ctx.send("✋ Chat mode stopped!")
 
+@bot.command()
+async def setmic(ctx, device_id: int):
+    """Set the microphone device. Usage: !setmic [device_id]"""
+    config['mic_device'] = device_id
+    await ctx.send(f"✅ Microphone device set to: {device_id}")
+
+@bot.command()
+async def setthreshold(ctx, threshold: int):
+    """Set the silence threshold. Usage: !setthreshold [value]"""
+    config['silence_threshold'] = threshold
+    await ctx.send(f"✅ Silence threshold set to: {threshold}")
+
+@bot.command()
+async def config_show(ctx):
+    """Show current configuration"""
+    result = "⚙️ **Current Configuration:**\n"
+    result += f"Microphone Device: {config['mic_device']}\n"
+    result += f"Silence Threshold: {config['silence_threshold']}\n"
+    result += f"Silence Duration: {config['silence_duration']} seconds"
+    await ctx.send(result)
+
+@bot.command()
+async def devices(ctx):
+    """List all available audio input devices"""
+    devices_list = sd.query_devices()
+    input_devices = []
+
+    for i, device in enumerate(devices_list):
+        if device['max_input_channels'] > 0:
+            input_devices.append(f"**{i}**: {device['name']} (Channels: {device['max_input_channels']}, SR: {device['default_samplerate']})")
+
+    if input_devices:
+        await ctx.send("🎤 **Available Input Devices:**\n" + "\n".join(input_devices))
+    else:
+        await ctx.send("❌ No input devices found!")
+
+@bot.command()
+async def testmic(ctx, device_id: int = 2, duration: int = 5):
+    """Test microphone and show audio levels. Usage: !testmic [device_id] [duration]"""
+    await ctx.send(f"🎙️ Testing device {device_id} for {duration} seconds...")
+
+    RATE = 16000
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    loop = asyncio.get_event_loop()
+
+    def record_test():
+        recording = sd.rec(
+            int(duration * RATE),
+            samplerate=RATE,
+            channels=1,
+            dtype='int16',
+            device=device_id
+        )
+        sd.wait()
+        return recording
+
+    try:
+        audio = await loop.run_in_executor(executor, record_test)
+
+        # Calculate RMS for the whole recording
+        rms = np.sqrt(np.mean(audio**2))
+        max_val = np.max(np.abs(audio))
+
+        # Calculate RMS for 1-second chunks
+        chunk_size = RATE
+        chunk_rms_values = []
+        for i in range(0, len(audio), chunk_size):
+            chunk = audio[i:i+chunk_size]
+            chunk_rms = np.sqrt(np.mean(chunk**2))
+            chunk_rms_values.append(chunk_rms)
+
+        avg_chunk_rms = np.mean(chunk_rms_values)
+        max_chunk_rms = np.max(chunk_rms_values)
+
+        result = f"📊 **Microphone Test Results:**\n"
+        result += f"Overall RMS: {rms:.2f}\n"
+        result += f"Max Value: {max_val}\n"
+        result += f"Average Chunk RMS: {avg_chunk_rms:.2f}\n"
+        result += f"Max Chunk RMS: {max_chunk_rms:.2f}\n"
+        result += f"Chunk RMS values: {[f'{v:.2f}' for v in chunk_rms_values]}\n\n"
+        result += f"💡 **Recommended Threshold:** {avg_chunk_rms * 0.3:.2f} - {avg_chunk_rms * 0.7:.2f}\n"
+        result += f"Current threshold: 500"
+
+        await ctx.send(result)
+
+        # Save the test recording
+        sf.write('test_recording.wav', audio, RATE)
+        await ctx.send("💾 Saved as test_recording.wav")
+
+    except Exception as e:
+        await ctx.send(f"❌ Error testing microphone: {str(e)}")
+    finally:
+        executor.shutdown(wait=False)
+
 @bot.event
 async def on_ready():
     print(f'✅ {bot.user} is online and ready!')
-    print(f'📋 Commands: !join, !leave, !listen')
+    print(f'📋 Commands: !join, !leave, !startchat, !stopchat')
+    print(f'🔧 Debug: !devices, !testmic [device_id] [duration], !config_show')
+    print(f'⚙️  Config: !setmic [device_id], !setthreshold [value]')
 
 @bot.command()
 async def join(ctx):
