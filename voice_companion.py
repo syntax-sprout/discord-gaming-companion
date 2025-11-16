@@ -42,7 +42,9 @@ is_listening = False
 config = {
     'mic_device': 2,
     'silence_threshold': 500,
-    'silence_duration': 2
+    'silence_duration': 2,
+    'llama_timeout': 120,  # Timeout for Llama API calls in seconds
+    'max_history': 10  # Maximum conversation history messages to keep
 }
 
 @bot.command()
@@ -150,7 +152,13 @@ async def continuous_listen(ctx):
                     # Get Llama response
                     conversation_history.append({"role": "user", "content": user_text})
 
-                    print("🔄 Step 2: Getting Llama response...")
+                    # Trim conversation history to prevent it from growing too large
+                    if len(conversation_history) > config['max_history']:
+                        # Keep only the last max_history messages
+                        conversation_history = conversation_history[-config['max_history']:]
+                        print(f"📝 Trimmed conversation history to last {config['max_history']} messages")
+
+                    print(f"🔄 Step 2: Getting Llama response (timeout: {config['llama_timeout']}s, history: {len(conversation_history)} msgs)...")
                     async with httpx.AsyncClient() as client:
                         response = await client.post(
                             "http://192.168.12.209:11434/api/chat",
@@ -159,7 +167,7 @@ async def continuous_listen(ctx):
                                 "messages": conversation_history,
                                 "stream": False
                             },
-                            timeout=30.0
+                            timeout=config['llama_timeout']
                         )
 
                         response.raise_for_status()  # Raise error for bad status codes
@@ -194,6 +202,13 @@ async def continuous_listen(ctx):
                     recorded_audio = []
                     silence_chunks = 0
                     await ctx.send("👂 Listening...")
+
+                except httpx.ReadTimeout:
+                    print(f"⏱️ Llama API timeout after {config['llama_timeout']}s")
+                    await ctx.send(f"⏱️ Llama took too long to respond (>{config['llama_timeout']}s). Try:\n• Increasing timeout: `!settimeout <seconds>`\n• Reducing history: `!sethistory <num_messages>`")
+                    await ctx.send("👂 Listening... (continuing after timeout)")
+                    recorded_audio = []
+                    silence_chunks = 0
 
                 except Exception as e:
                     import traceback
@@ -242,12 +257,41 @@ async def setthreshold(ctx, threshold: int):
         await ctx.send(f"✅ Silence threshold set to: {threshold}")
 
 @bot.command()
+async def settimeout(ctx, seconds: int):
+    """Set the Llama API timeout. Usage: !settimeout [seconds]"""
+    if seconds < 10:
+        await ctx.send("❌ Timeout must be at least 10 seconds")
+        return
+    config['llama_timeout'] = seconds
+    await ctx.send(f"✅ Llama timeout set to: {seconds} seconds")
+
+@bot.command()
+async def sethistory(ctx, num_messages: int):
+    """Set max conversation history. Usage: !sethistory [num_messages]"""
+    if num_messages < 2:
+        await ctx.send("❌ History must be at least 2 messages")
+        return
+    config['max_history'] = num_messages
+    await ctx.send(f"✅ Max conversation history set to: {num_messages} messages")
+
+@bot.command()
+async def clearhistory(ctx):
+    """Clear the conversation history"""
+    global conversation_history
+    old_count = len(conversation_history)
+    conversation_history = []
+    await ctx.send(f"🗑️ Cleared {old_count} messages from conversation history")
+
+@bot.command()
 async def config_show(ctx):
     """Show current configuration"""
     result = "⚙️ **Current Configuration:**\n"
     result += f"Microphone Device: {config['mic_device']}\n"
     result += f"Silence Threshold: {config['silence_threshold']}\n"
-    result += f"Silence Duration: {config['silence_duration']} seconds"
+    result += f"Silence Duration: {config['silence_duration']} seconds\n"
+    result += f"Llama Timeout: {config['llama_timeout']} seconds\n"
+    result += f"Max History: {config['max_history']} messages\n"
+    result += f"Current History: {len(conversation_history)} messages"
     await ctx.send(result)
 
 @bot.command()
@@ -329,6 +373,7 @@ async def on_ready():
     print(f'📋 Commands: !join, !leave, !startchat, !stopchat')
     print(f'🔧 Debug: !devices, !testmic [device_id] [duration], !config_show')
     print(f'⚙️  Config: !setmic [device_id], !setthreshold [value]')
+    print(f'🔧 Advanced: !settimeout [seconds], !sethistory [num_messages], !clearhistory')
 
 @bot.command()
 async def join(ctx):
