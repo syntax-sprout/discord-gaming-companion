@@ -70,22 +70,24 @@ async def continuous_listen(ctx):
 
     RATE = 16000
     CHUNK_DURATION = 1  # Record in 1-second chunks
-    SILENCE_THRESHOLD = config['silence_threshold']
-    SILENCE_DURATION = config['silence_duration']
-    MIC_DEVICE = config['mic_device']
-    
+
     recorded_audio = []
     silence_chunks = 0
-    
+
     await ctx.send("👂 Listening...")
-    
+
     # Use ThreadPoolExecutor to run blocking audio operations
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    
+
     while is_listening:
+        # Read config values on each iteration so changes take effect immediately
+        SILENCE_THRESHOLD = config['silence_threshold']
+        SILENCE_DURATION = config['silence_duration']
+        MIC_DEVICE = config['mic_device']
+
         # Run audio recording in a separate thread
         loop = asyncio.get_event_loop()
-        
+
         def record_chunk():
             chunk = sd.rec(
                 int(CHUNK_DURATION * RATE),
@@ -96,7 +98,7 @@ async def continuous_listen(ctx):
             )
             sd.wait()
             return chunk
-        
+
         # Record without blocking the event loop
         chunk = await loop.run_in_executor(executor, record_chunk)
 
@@ -202,13 +204,19 @@ async def stopchat(ctx):
 async def setmic(ctx, device_id: int):
     """Set the microphone device. Usage: !setmic [device_id]"""
     config['mic_device'] = device_id
-    await ctx.send(f"✅ Microphone device set to: {device_id}")
+    if is_listening:
+        await ctx.send(f"✅ Microphone device set to: {device_id} (will take effect on next recording chunk)")
+    else:
+        await ctx.send(f"✅ Microphone device set to: {device_id}")
 
 @bot.command()
 async def setthreshold(ctx, threshold: int):
     """Set the silence threshold. Usage: !setthreshold [value]"""
     config['silence_threshold'] = threshold
-    await ctx.send(f"✅ Silence threshold set to: {threshold}")
+    if is_listening:
+        await ctx.send(f"✅ Silence threshold set to: {threshold} (active immediately)")
+    else:
+        await ctx.send(f"✅ Silence threshold set to: {threshold}")
 
 @bot.command()
 async def config_show(ctx):
