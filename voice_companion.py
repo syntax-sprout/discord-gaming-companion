@@ -43,9 +43,9 @@ config = {
     'mic_device': 2,
     'silence_threshold': 500,
     'silence_duration': 2,
-    'llama_timeout': 120,  # Timeout for Llama API calls in seconds
+    'llama_timeout': 30,  # Timeout for Llama API calls in seconds (reduced from 120 for faster failure detection)
     'max_history': 10,  # Maximum conversation history messages to keep
-    'max_response_tokens': 100,  # Maximum tokens for Llama responses (shorter = faster)
+    'max_response_tokens': 75,  # Maximum tokens for Llama responses (shorter = faster, reduced from 100)
     'system_prompt': 'You are a helpful gaming companion. Keep responses brief and conversational.'
 }
 
@@ -165,52 +165,74 @@ async def continuous_listen(ctx):
                     # Build messages with system prompt
                     messages = [{"role": "system", "content": config['system_prompt']}] + conversation_history
 
-                    async with httpx.AsyncClient() as client:
-                        response = await client.post(
-                            "http://192.168.12.209:11434/api/chat",
-                            json={
-                                "model": "llama3.2:3b",
-                                "messages": messages,
-                                "stream": False,
-                                "options": {
-                                    "num_predict": config['max_response_tokens']
-                                }
-                            },
-                            timeout=config['llama_timeout']
-                        )
+                    # Create a task to show progress while waiting
+                    import time
+                    start_time = time.time()
 
-                        response.raise_for_status()  # Raise error for bad status codes
-                        llama_response = response.json()["message"]["content"]
-                        conversation_history.append({"role": "assistant", "content": llama_response})
+                    async def show_progress():
+                        await asyncio.sleep(10)
+                        if time.time() - start_time > 10:
+                            await ctx.send("⏳ Still thinking... (10s)")
+                        await asyncio.sleep(10)
+                        if time.time() - start_time > 20:
+                            await ctx.send("⏳ Taking longer than usual... (20s)")
 
-                        print(f"✅ Llama response: {llama_response[:100]}...")
-                        await ctx.send(f"🤖 Bot: {llama_response}")
+                    progress_task = asyncio.create_task(show_progress())
 
-                        # Speak response
-                        print("🔄 Step 3: Generating TTS...")
-                        tts_response = await client_oai.audio.speech.create(
-                            model="tts-1",
-                            voice="echo",
-                            input=llama_response
-                        )
+                    try:
+                        async with httpx.AsyncClient() as client:
+                            response = await client.post(
+                                "http://192.168.12.209:11434/api/chat",
+                                json={
+                                    "model": "llama3.2:3b",
+                                    "messages": messages,
+                                    "stream": False,
+                                    "options": {
+                                        "num_predict": config['max_response_tokens']
+                                    }
+                                },
+                                timeout=config['llama_timeout']
+                            )
 
-                        with open("bot_response.mp3", "wb") as f:
-                            f.write(tts_response.content)
+                            response.raise_for_status()  # Raise error for bad status codes
+                            llama_response = response.json()["message"]["content"]
+                            conversation_history.append({"role": "assistant", "content": llama_response})
 
-                        print("🔄 Step 4: Playing audio...")
-                        audio_source = discord.FFmpegPCMAudio("bot_response.mp3")
-                        ctx.voice_client.play(audio_source)
+                            print(f"✅ Llama response: {llama_response[:100]}...")
+                            await ctx.send(f"🤖 Bot: {llama_response}")
 
-                        # Wait for audio to finish playing
-                        while ctx.voice_client.is_playing():
-                            await asyncio.sleep(0.1)
+                            # Speak response
+                            print("🔄 Step 3: Generating TTS...")
+                            tts_response = await client_oai.audio.speech.create(
+                                model="tts-1",
+                                voice="echo",
+                                input=llama_response
+                            )
 
-                        print("✅ Audio playback complete")
+                            with open("bot_response.mp3", "wb") as f:
+                                f.write(tts_response.content)
 
-                    # Reset for next input
-                    recorded_audio = []
-                    silence_chunks = 0
-                    await ctx.send("👂 Listening...")
+                            print("🔄 Step 4: Playing audio...")
+                            audio_source = discord.FFmpegPCMAudio("bot_response.mp3")
+                            ctx.voice_client.play(audio_source)
+
+                            # Wait for audio to finish playing
+                            while ctx.voice_client.is_playing():
+                                await asyncio.sleep(0.1)
+
+                            print("✅ Audio playback complete")
+
+                        # Reset for next input
+                        recorded_audio = []
+                        silence_chunks = 0
+                        await ctx.send("👂 Listening...")
+
+                    finally:
+                        progress_task.cancel()
+                        try:
+                            await progress_task
+                        except asyncio.CancelledError:
+                            pass
 
                 except httpx.ReadTimeout:
                     print(f"⏱️ Llama API timeout after {config['llama_timeout']}s")
