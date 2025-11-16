@@ -44,7 +44,9 @@ config = {
     'silence_threshold': 500,
     'silence_duration': 2,
     'llama_timeout': 120,  # Timeout for Llama API calls in seconds
-    'max_history': 10  # Maximum conversation history messages to keep
+    'max_history': 10,  # Maximum conversation history messages to keep
+    'max_response_tokens': 100,  # Maximum tokens for Llama responses (shorter = faster)
+    'system_prompt': 'You are a helpful gaming companion. Keep responses brief and conversational.'
 }
 
 @bot.command()
@@ -158,14 +160,21 @@ async def continuous_listen(ctx):
                         conversation_history = conversation_history[-config['max_history']:]
                         print(f"📝 Trimmed conversation history to last {config['max_history']} messages")
 
-                    print(f"🔄 Step 2: Getting Llama response (timeout: {config['llama_timeout']}s, history: {len(conversation_history)} msgs)...")
+                    print(f"🔄 Step 2: Getting Llama response (timeout: {config['llama_timeout']}s, history: {len(conversation_history)} msgs, max tokens: {config['max_response_tokens']})...")
+
+                    # Build messages with system prompt
+                    messages = [{"role": "system", "content": config['system_prompt']}] + conversation_history
+
                     async with httpx.AsyncClient() as client:
                         response = await client.post(
                             "http://192.168.12.209:11434/api/chat",
                             json={
                                 "model": "llama3.2:3b",
-                                "messages": conversation_history,
-                                "stream": False
+                                "messages": messages,
+                                "stream": False,
+                                "options": {
+                                    "num_predict": config['max_response_tokens']
+                                }
                             },
                             timeout=config['llama_timeout']
                         )
@@ -275,6 +284,23 @@ async def sethistory(ctx, num_messages: int):
     await ctx.send(f"✅ Max conversation history set to: {num_messages} messages")
 
 @bot.command()
+async def setmaxlength(ctx, tokens: int):
+    """Set max response length in tokens. Usage: !setmaxlength [tokens]"""
+    if tokens < 10:
+        await ctx.send("❌ Max length must be at least 10 tokens")
+        return
+    if tokens > 1000:
+        await ctx.send("⚠️ Warning: Very long responses may timeout. Recommended: 50-200 tokens")
+    config['max_response_tokens'] = tokens
+    await ctx.send(f"✅ Max response length set to: {tokens} tokens (~{tokens * 4} characters)")
+
+@bot.command()
+async def setprompt(ctx, *, prompt: str):
+    """Set bot personality/system prompt. Usage: !setprompt [text]"""
+    config['system_prompt'] = prompt
+    await ctx.send(f"✅ System prompt set to: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
+
+@bot.command()
 async def clearhistory(ctx):
     """Clear the conversation history"""
     global conversation_history
@@ -291,7 +317,9 @@ async def config_show(ctx):
     result += f"Silence Duration: {config['silence_duration']} seconds\n"
     result += f"Llama Timeout: {config['llama_timeout']} seconds\n"
     result += f"Max History: {config['max_history']} messages\n"
-    result += f"Current History: {len(conversation_history)} messages"
+    result += f"Current History: {len(conversation_history)} messages\n"
+    result += f"Max Response Length: {config['max_response_tokens']} tokens\n"
+    result += f"System Prompt: {config['system_prompt'][:50]}{'...' if len(config['system_prompt']) > 50 else ''}"
     await ctx.send(result)
 
 @bot.command()
@@ -372,8 +400,8 @@ async def on_ready():
     print(f'✅ {bot.user} is online and ready!')
     print(f'📋 Commands: !join, !leave, !startchat, !stopchat')
     print(f'🔧 Debug: !devices, !testmic [device_id] [duration], !config_show')
-    print(f'⚙️  Config: !setmic [device_id], !setthreshold [value]')
-    print(f'🔧 Advanced: !settimeout [seconds], !sethistory [num_messages], !clearhistory')
+    print(f'⚙️  Config: !setmic, !setthreshold, !setmaxlength, !setprompt')
+    print(f'🔧 Advanced: !settimeout, !sethistory, !clearhistory')
 
 @bot.command()
 async def join(ctx):
