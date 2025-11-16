@@ -37,7 +37,7 @@ Think: lightweight AI gaming buddy / co-pilot that can hang out in call with you
 - A working microphone on the machine running the bot
 - OpenAI API key
 - Discord bot token
-- A local Llama chat endpoint (example: Ollama at `http://192.168.12.209:11434/api/chat`)
+- A local Llama chat endpoint (example: Ollama at `http://localhost:11434/api/chat`)
 
 ---
 
