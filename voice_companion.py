@@ -11,6 +11,11 @@ import httpx
 import numpy as np
 import concurrent.futures
 import threading
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
 
 def is_speech(audio_chunk, threshold=500):
     """Detect if audio chunk contains speech based on volume"""
@@ -182,13 +187,14 @@ async def continuous_listen(ctx):
                     try:
                         async with httpx.AsyncClient() as client:
                             response = await client.post(
-                                "http://192.168.12.209:11434/api/chat",
+                                "http://localhost:11434/api/chat",
                                 json={
-                                    "model": "llama3.2:3b",
+                                    "model": "llama2",
                                     "messages": messages,
                                     "stream": False,
                                     "options": {
-                                        "num_predict": config['max_response_tokens']
+                                        "num_predict": config['max_response_tokens'],
+                                        "temperature": 0.7
                                     }
                                 },
                                 timeout=config['llama_timeout']
