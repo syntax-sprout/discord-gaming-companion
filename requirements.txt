@@ -1,0 +1,6 @@
+discord.py
+openai
+sounddevice
+soundfile
+numpy
+httpx
