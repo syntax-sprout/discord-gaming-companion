@@ -1,8 +1,8 @@
-Discord Gaming Voice Companion 🎮🗣️
+## Discord Gaming Voice Companion 🎮🗣️
 
 A real‑time AI co‑pilot for Discord voice chat. This Python bot joins your voice channel, listens to your speech, transcribes everything using OpenAI Whisper, and replies instantly—both in text and with synthesized speech—using a local Llama model and TTS. Whether you’re gaming, chilling, or testing AI voice assistants, this bot is your lightweight, always‑on, AI gaming buddy.
 
-✨ Features
+## ✨ Features
 
 🎧 Joins your Discord voice channel and continuously listens
 
@@ -20,7 +20,7 @@ A real‑time AI co‑pilot for Discord voice chat. This Python bot joins your v
 
 🧪 Mic/device testing & setup commands for smoother onboarding
 
-🧱 Tech Stack
+## 🧱 Tech Stack
 
 Python 3.10+
 
@@ -34,7 +34,7 @@ Local Llama endpoint (HTTP, e.g. Ollama)
 
 numpy (RMS/silence detection)
 
-📦 Requirements
+## 📦 Requirements
 
 Python 3.10+ (recommended)
 
@@ -49,6 +49,15 @@ Discord bot token
 Local Llama chat endpoint (e.g. Ollama
  at http://localhost:11434/api/chat)
 
-🔐 Secrets Setup
+## 🔐 Secrets Setup
 
 Secrets are loaded from .streamlit/secrets.toml.
+
+## 🔐 Setup .env
+
+Create a `.env` file in the root folder with:
+
+LLAMA_ENDPOINT=http://localhost:11434/api/chat
+
+Or point it to your custom Llama server endpoint.
+
