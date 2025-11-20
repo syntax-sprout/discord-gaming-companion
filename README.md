@@ -1,49 +1,54 @@
-# Discord Gaming Voice Companion 🎮🎤
+Discord Gaming Voice Companion 🎮🗣️
 
-A Discord bot that joins your voice channel, listens to you talk, transcribes your speech with Whisper, sends your message to a local Llama model, then replies back **in text and voice** in real time.
+A real‑time AI co‑pilot for Discord voice chat. This Python bot joins your voice channel, listens to your speech, transcribes everything using OpenAI Whisper, and replies instantly—both in text and with synthesized speech—using a local Llama model and TTS. Whether you’re gaming, chilling, or testing AI voice assistants, this bot is your lightweight, always‑on, AI gaming buddy.
 
-Think: lightweight AI gaming buddy / co-pilot that can hang out in call with you.
+✨ Features
 
----
+🎧 Joins your Discord voice channel and continuously listens
 
-## ✨ Features
+🗣 Speech vs. silence detection (RMS volume threshold)
 
-- 🎧 Joins your Discord voice channel and continuously listens
-- 🗣 Detects speech vs silence using RMS (volume) thresholds
-- ✍️ Transcribes speech to text using OpenAI Whisper
-- 🤖 Sends conversation history to a local `llama3.2:3b` chat endpoint
-- 💬 Replies in text **and** generates TTS audio using `tts-1`
-- 🧠 Maintains short conversation history with a configurable system prompt
-- ⚙️ Runtime config via Discord commands (no restarts needed)
-- 🧪 Built-in mic testing and device listing for easier setup
+✍️ Real‑time speech transcription (OpenAI Whisper)
 
----
+🤖 Sends messages to a local Llama endpoint (Ollama or compatible)
 
-## 🧱 Tech Stack
+💬 AI replies in text & generates TTS audio (OpenAI TTS)
 
-- Python
-- [discord.py](https://discordpy.readthedocs.io/)
-- `sounddevice` + `soundfile` for audio recording
-- OpenAI API (Whisper + TTS)
-- Local Llama endpoint via HTTP (`httpx`)
-- NumPy for RMS / silence detection
+🧠 Maintains short conversation history (configurable system prompt)
 
----
+⚙️ Runtime config via Discord commands (no restarts needed)
 
-## 📦 Requirements
+🧪 Mic/device testing & setup commands for smoother onboarding
 
-- Python 3.10+ (recommended)
-- FFmpeg installed and available in your PATH
-- A working microphone on the machine running the bot
-- OpenAI API key
-- Discord bot token
-- A local Llama chat endpoint (example: Ollama at `http://localhost:11434/api/chat`)
+🧱 Tech Stack
 
----
+Python 3.10+
 
-## 🔐 Secrets Setup
+discord.py
 
-Secrets are loaded from:
+sounddevice + soundfile (audio recording)
 
-```text
-.streamlit/secrets.toml
+OpenAI API (Whisper, TTS)
+
+Local Llama endpoint (HTTP, e.g. Ollama)
+
+numpy (RMS/silence detection)
+
+📦 Requirements
+
+Python 3.10+ (recommended)
+
+FFmpeg (in your PATH)
+
+Working microphone on host machine
+
+OpenAI API key
+
+Discord bot token
+
+Local Llama chat endpoint (e.g. Ollama
+ at http://localhost:11434/api/chat)
+
+🔐 Secrets Setup
+
+Secrets are loaded from .streamlit/secrets.toml.
