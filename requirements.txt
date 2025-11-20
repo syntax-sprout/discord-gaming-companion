@@ -4,4 +4,3 @@ sounddevice
 soundfile
 numpy
 httpx
-.env
