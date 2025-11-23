@@ -11,15 +11,9 @@ import httpx
 import numpy as np
 import concurrent.futures
 import threading
-from dotenv import load_dotenv
-import os
-
-load_dotenv()
-
 
 def is_speech(audio_chunk, threshold=500):
     """Detect if audio chunk contains speech based on volume"""
-    # Calculate RMS (root mean square) of audio
     rms = np.sqrt(np.mean(audio_chunk**2))
     return rms > threshold
 
@@ -30,6 +24,8 @@ with open(secrets_path, "rb") as f:
 
 DISCORD_TOKEN = secrets["discord_voice"]
 OPENAI_API_KEY = secrets["openai"]
+KINDROID_API_KEY = secrets["kindroid"]
+LOTTIE_AI_ID = secrets["lottie_ai_id"]
 
 client_oai = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
@@ -48,10 +44,8 @@ config = {
     'mic_device': 2,
     'silence_threshold': 500,
     'silence_duration': 2,
-    'llama_timeout': 30,  # Timeout for Llama API calls in seconds (reduced from 120 for faster failure detection)
-    'max_history': 10,  # Maximum conversation history messages to keep
-    'max_response_tokens': 75,  # Maximum tokens for Llama responses (shorter = faster, reduced from 100)
-    'system_prompt': 'You are a helpful gaming companion. Keep responses brief and conversational.'
+    'kindroid_timeout': 30,
+    'max_history': 10,
 }
 
 @bot.command()
@@ -68,7 +62,7 @@ async def startchat(ctx):
         return
     
     is_listening = True
-    await ctx.send("🎤 **CHAT MODE ACTIVE!** Just start talking naturally. Say 'stop chat' or use !stopchat to end.")
+    await ctx.send("🎤 **CHAT MODE ACTIVE!** Lottie is ready to chat! Just start talking naturally. Say 'stop chat' or use !stopchat to end.")
     
     # Start the listening loop
     await continuous_listen(ctx)
@@ -78,7 +72,7 @@ async def continuous_listen(ctx):
     global is_listening, conversation_history
 
     RATE = 16000
-    CHUNK_DURATION = 1  # Record in 1-second chunks
+    CHUNK_DURATION = 1
 
     recorded_audio = []
     silence_chunks = 0
@@ -89,7 +83,6 @@ async def continuous_listen(ctx):
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
     while is_listening:
-        # Read config values on each iteration so changes take effect immediately
         SILENCE_THRESHOLD = config['silence_threshold']
         SILENCE_DURATION = config['silence_duration']
         MIC_DEVICE = config['mic_device']
@@ -110,22 +103,17 @@ async def continuous_listen(ctx):
 
         # Record without blocking the event loop
         chunk = await loop.run_in_executor(executor, record_chunk)
-
-        # Calculate and log RMS for debugging
         chunk_rms = np.sqrt(np.mean(chunk**2))
 
         # Check if this chunk has speech
         if is_speech(chunk, SILENCE_THRESHOLD):
-            # Speech detected!
             print(f"🎤 Speech detected! RMS: {chunk_rms:.2f} (threshold: {SILENCE_THRESHOLD})")
             recorded_audio.append(chunk)
             silence_chunks = 0
         else:
-            # Silence detected
             silence_chunks += 1
             print(f"🔇 Silence {silence_chunks}/{SILENCE_DURATION} - RMS: {chunk_rms:.2f} (threshold: {SILENCE_THRESHOLD})")
 
-            # If we have recorded audio AND hit silence threshold, process it
             if len(recorded_audio) > 0 and silence_chunks >= SILENCE_DURATION:
                 print(f"✅ Processing {len(recorded_audio)} chunks of audio...")
                 await ctx.send("🔄 Processing...")
@@ -137,7 +125,6 @@ async def continuous_listen(ctx):
                 sf.write('temp_recording.wav', full_audio, RATE)
                 
                 try:
-                    # Transcribe
                     print("🔄 Step 1: Transcribing audio...")
                     with open('temp_recording.wav', 'rb') as audio_file:
                         transcript = await client_oai.audio.transcriptions.create(
@@ -156,63 +143,36 @@ async def continuous_listen(ctx):
 
                     await ctx.send(f"📝 You: {user_text}")
 
-                    # Get Llama response
-                    conversation_history.append({"role": "user", "content": user_text})
-
-                    # Trim conversation history to prevent it from growing too large
-                    if len(conversation_history) > config['max_history']:
-                        # Keep only the last max_history messages
-                        conversation_history = conversation_history[-config['max_history']:]
-                        print(f"📝 Trimmed conversation history to last {config['max_history']} messages")
-
-                    print(f"🔄 Step 2: Getting Llama response (timeout: {config['llama_timeout']}s, history: {len(conversation_history)} msgs, max tokens: {config['max_response_tokens']})...")
-
-                    # Build messages with system prompt
-                    messages = [{"role": "system", "content": config['system_prompt']}] + conversation_history
-
-                    # Create a task to show progress while waiting
-                    import time
-                    start_time = time.time()
-
-                    async def show_progress():
-                        await asyncio.sleep(10)
-                        if time.time() - start_time > 10:
-                            await ctx.send("⏳ Still thinking... (10s)")
-                        await asyncio.sleep(10)
-                        if time.time() - start_time > 20:
-                            await ctx.send("⏳ Taking longer than usual... (20s)")
-
-                    progress_task = asyncio.create_task(show_progress())
+                    # Get Lottie's response from Kindroid
+                    print(f"🔄 Step 2: Getting Lottie's response...")
 
                     try:
                         async with httpx.AsyncClient() as client:
                             response = await client.post(
-                                "http://localhost:11434/api/chat",
-                                json={
-                                    "model": "llama2",
-                                    "messages": messages,
-                                    "stream": False,
-                                    "options": {
-                                        "num_predict": config['max_response_tokens'],
-                                        "temperature": 0.7
-                                    }
+                                "https://api.kindroid.ai/v1/send-message",
+                                headers={
+                                    "Authorization": f"Bearer {KINDROID_API_KEY}",
+                                    "Content-Type": "application/json"
                                 },
-                                timeout=config['llama_timeout']
+                                json={
+                                    "ai_id": LOTTIE_AI_ID,
+                                    "message": user_text
+                                },
+                                timeout=config['kindroid_timeout']
                             )
 
-                            response.raise_for_status()  # Raise error for bad status codes
-                            llama_response = response.json()["message"]["content"]
-                            conversation_history.append({"role": "assistant", "content": llama_response})
+                            response.raise_for_status()
+                            lottie_response = response.text
+                            
+                            print(f"✅ Lottie's response: {lottie_response[:100]}...")
+                            await ctx.send(f"💅 Lottie: {lottie_response}")
 
-                            print(f"✅ Llama response: {llama_response[:100]}...")
-                            await ctx.send(f"🤖 Bot: {llama_response}")
-
-                            # Speak response
+                            # Speak response with OpenAI TTS
                             print("🔄 Step 3: Generating TTS...")
                             tts_response = await client_oai.audio.speech.create(
                                 model="tts-1",
-                                voice="echo",
-                                input=llama_response
+                                voice="nova",
+                                input=lottie_response
                             )
 
                             with open("bot_response.mp3", "wb") as f:
@@ -233,19 +193,12 @@ async def continuous_listen(ctx):
                         silence_chunks = 0
                         await ctx.send("👂 Listening...")
 
-                    finally:
-                        progress_task.cancel()
-                        try:
-                            await progress_task
-                        except asyncio.CancelledError:
-                            pass
-
-                except httpx.ReadTimeout:
-                    print(f"⏱️ Llama API timeout after {config['llama_timeout']}s")
-                    await ctx.send(f"⏱️ Llama took too long to respond (>{config['llama_timeout']}s). Try:\n• Increasing timeout: `!settimeout <seconds>`\n• Reducing history: `!sethistory <num_messages>`")
-                    await ctx.send("👂 Listening... (continuing after timeout)")
-                    recorded_audio = []
-                    silence_chunks = 0
+                    except httpx.ReadTimeout:
+                        print(f"⏱️ Kindroid API timeout after {config['kindroid_timeout']}s")
+                        await ctx.send(f"⏱️ Lottie took too long to respond (>{config['kindroid_timeout']}s).")
+                        await ctx.send("👂 Listening... (continuing after timeout)")
+                        recorded_audio = []
+                        silence_chunks = 0
 
                 except Exception as e:
                     import traceback
@@ -295,46 +248,12 @@ async def setthreshold(ctx, threshold: int):
 
 @bot.command()
 async def settimeout(ctx, seconds: int):
-    """Set the Llama API timeout. Usage: !settimeout [seconds]"""
+    """Set the Kindroid API timeout. Usage: !settimeout [seconds]"""
     if seconds < 10:
         await ctx.send("❌ Timeout must be at least 10 seconds")
         return
-    config['llama_timeout'] = seconds
-    await ctx.send(f"✅ Llama timeout set to: {seconds} seconds")
-
-@bot.command()
-async def sethistory(ctx, num_messages: int):
-    """Set max conversation history. Usage: !sethistory [num_messages]"""
-    if num_messages < 2:
-        await ctx.send("❌ History must be at least 2 messages")
-        return
-    config['max_history'] = num_messages
-    await ctx.send(f"✅ Max conversation history set to: {num_messages} messages")
-
-@bot.command()
-async def setmaxlength(ctx, tokens: int):
-    """Set max response length in tokens. Usage: !setmaxlength [tokens]"""
-    if tokens < 10:
-        await ctx.send("❌ Max length must be at least 10 tokens")
-        return
-    if tokens > 1000:
-        await ctx.send("⚠️ Warning: Very long responses may timeout. Recommended: 50-200 tokens")
-    config['max_response_tokens'] = tokens
-    await ctx.send(f"✅ Max response length set to: {tokens} tokens (~{tokens * 4} characters)")
-
-@bot.command()
-async def setprompt(ctx, *, prompt: str):
-    """Set bot personality/system prompt. Usage: !setprompt [text]"""
-    config['system_prompt'] = prompt
-    await ctx.send(f"✅ System prompt set to: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
-
-@bot.command()
-async def clearhistory(ctx):
-    """Clear the conversation history"""
-    global conversation_history
-    old_count = len(conversation_history)
-    conversation_history = []
-    await ctx.send(f"🗑️ Cleared {old_count} messages from conversation history")
+    config['kindroid_timeout'] = seconds
+    await ctx.send(f"✅ Kindroid timeout set to: {seconds} seconds")
 
 @bot.command()
 async def config_show(ctx):
@@ -343,11 +262,7 @@ async def config_show(ctx):
     result += f"Microphone Device: {config['mic_device']}\n"
     result += f"Silence Threshold: {config['silence_threshold']}\n"
     result += f"Silence Duration: {config['silence_duration']} seconds\n"
-    result += f"Llama Timeout: {config['llama_timeout']} seconds\n"
-    result += f"Max History: {config['max_history']} messages\n"
-    result += f"Current History: {len(conversation_history)} messages\n"
-    result += f"Max Response Length: {config['max_response_tokens']} tokens\n"
-    result += f"System Prompt: {config['system_prompt'][:50]}{'...' if len(config['system_prompt']) > 50 else ''}"
+    result += f"Kindroid Timeout: {config['kindroid_timeout']} seconds\n"
     await ctx.send(result)
 
 @bot.command()
@@ -426,10 +341,10 @@ async def testmic(ctx, device_id: int = 2, duration: int = 5):
 @bot.event
 async def on_ready():
     print(f'✅ {bot.user} is online and ready!')
+    print(f'💅 Lottie (Kindroid) is connected!')
     print(f'📋 Commands: !join, !leave, !startchat, !stopchat')
     print(f'🔧 Debug: !devices, !testmic [device_id] [duration], !config_show')
-    print(f'⚙️  Config: !setmic, !setthreshold, !setmaxlength, !setprompt')
-    print(f'🔧 Advanced: !settimeout, !sethistory, !clearhistory')
+    print(f'⚙️  Config: !setmic, !setthreshold, !settimeout')
 
 @bot.command()
 async def join(ctx):
@@ -437,7 +352,7 @@ async def join(ctx):
     if ctx.author.voice:
         channel = ctx.author.voice.channel
         await channel.connect()
-        await ctx.send(f"👋 Joined {channel.name}!")
+        await ctx.send(f"👋 Joined {channel.name}! Lottie is ready to chat!")
     else:
         await ctx.send("❌ You need to be in a voice channel first!")
 
